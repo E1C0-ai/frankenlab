@@ -1,0 +1,1 @@
+{"hooks":[{"action":"node test/app.test.js","description":"Run node test/app.test.js after saving src/app.js","name":"on-save-run-tests","pattern":"src/app.js","trigger":"onFileSave"}]}

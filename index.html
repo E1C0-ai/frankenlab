@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>FrankenLab — 一句话，开一家一站式小店</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<main>
+<h1>FrankenLab</h1>
+<p class="sub">一句话，开一家一站式小店：输入一句话，得到一个能点单、能接单、能记账的模拟店铺 App，再加一套开店采购方案。</p>
+<div class="disclaimer" role="note">⚠ 本项目仅黑客松模拟演示，无真实交易能力，不会产生真实订单、不会扣款。全部数据仅保存在浏览器本地，不上传服务器。</div>
+<p class="note">Kiroween 2026 · Frankenstein 参赛作品 · 全部运算在浏览器本地，不上传用户数据，不注册，不付费。</p>
+<div id="kernel-error" class="error" hidden>FrankenLab 内核脚本加载失败，请刷新页面</div>
+
+<section class="card">
+<h2>1. 说出你的开店想法</h2>
+<label>一句话说清你想开什么店
+<input id="idea" type="text" placeholder="例如：开一家奶茶店" value="开一家奶茶店">
+</label>
+<div class="row" id="samples">
+<button type="button" class="sample-btn" data-idea="开一家奶茶店">示例：开一家奶茶店</button>
+<button type="button" class="sample-btn" data-idea="开一家美甲工作室">示例：美甲工作室</button>
+<button type="button" class="sample-btn" data-idea="开一家少儿钢琴教室">示例：少儿钢琴教室</button>
+</div>
+<div class="row">
+<button id="btn-generate">生成我的店铺</button>
+<button id="btn-reset" class="secondary">重置整个店铺</button>
+</div>
+<p id="loading" hidden>正在本地生成店铺…</p>
+<p id="msg" role="status"></p>
+</section>
+
+<section id="shop" class="card" hidden>
+<h2>2. 你的店铺</h2>
+<p><strong id="shop-name"></strong>（<span id="shop-type"></span>）</p>
+<p id="shop-slogan" class="sub"></p>
+
+<h3>点单</h3>
+<div id="menu" class="menu-grid"></div>
+
+<h3>购物车</h3>
+<div id="cart"></div>
+
+<h3>下单结算（模拟演示，不是真实下单）</h3>
+<label>顾客姓名
+<input id="cust-name" type="text" placeholder="例如：小明（演示用）" autocomplete="off">
+</label>
+<label>顾客手机号
+<input id="cust-phone" type="tel" placeholder="例如：13800000000（演示用）" autocomplete="off">
+</label>
+<p class="hint">演示用，请勿填写你的真实私人手机号。姓名、电话仅保存在浏览器本地，不会发送出去。</p>
+<label>预约时间
+<input id="cust-time" type="text" placeholder="例如：今天 18:00" autocomplete="off">
+</label>
+<div class="row"><button id="btn-order">提交订单（模拟）</button></div>
+
+<h3>订单管理</h3>
+<div id="orders"></div>
+
+<h3>账本</h3>
+<p id="ledger-summary"></p>
+<div id="ledger-bars"></div>
+<p class="hint">账本只统计已完成订单的收入；取消的订单不计入。</p>
+</section>
+
+<section id="procurement" class="card" hidden>
+<h2>3. 开店采购方案</h2>
+<p class="disclaimer small">价格仅模拟参考，不保证准确，不作为实际采购依据。节省金额仅为模拟估算，不是实际可拿到的优惠。所有价格都是参考价，会变，以实际购买时为准。</p>
+<div id="proc-list"></div>
+<p id="savings"></p>
+<div class="row">
+<button id="btn-export">勾选采购项，一键复制导出采购清单</button>
+</div>
+<p class="hint">复制后自己去电商粘贴搜索。本项目没有一键购买、不产生真实订单、不扣款。</p>
+<p id="export-msg" role="status"></p>
+<textarea id="export-text" rows="8" hidden readonly></textarea>
+</section>
+
+<section id="todos-sec" class="card" hidden>
+<h2>4. 开店待办</h2>
+<p class="hint">打勾后保存在浏览器本地，刷新不丢。</p>
+<ul id="todos"></ul>
+</section>
+
+<section class="card">
+<h2>隐私说明</h2>
+<p>全部运算在浏览器本地；姓名、电话、订单、待办、采购勾选只存在浏览器 localStorage，绝不向后端上传，不回传服务器。关闭页面后数据仍在你自己的浏览器里，点“重置整个店铺”可以一键清空。</p>
+<p>本项目仅为创业模拟演示，不是真实商用系统，无真实交易能力。</p>
+</section>
+</main>
+<script src="src/app.js"></script>
+<script>
+(function () {
+  var STORAGE_KEY = 'frankenlab-shop-v2';
+  var btns = ['btn-generate', 'btn-reset', 'btn-export', 'btn-order'].map(function (id) { return document.getElementById(id); });
+  function setDisabled(d) { btns.forEach(function (b) { if (b) b.disabled = d; }); }
+  if (!window.FrankenLab || !window.FrankenLab.generateShop) {
+    document.getElementById('kernel-error').hidden = false;
+    setDisabled(true);
+    return;
+  }
+  var FL = window.FrankenLab;
+  var state = { shop: null, cart: {}, orders: [], todosDone: {}, procChecked: {} };
+  function save() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {} }
+  function load() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      var s = JSON.parse(raw);
+      if (s && s.shop) state = s;
+    } catch (e) {}
+  }
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function renderShop() {
+    if (!state.shop) { ['shop', 'procurement', 'todos-sec'].forEach(function (id) { document.getElementById(id).hidden = true; }); return; }
+    document.getElementById('shop').hidden = false;
+    document.getElementById('procurement').hidden = false;
+    document.getElementById('todos-sec').hidden = false;
+    document.getElementById('shop-name').textContent = state.shop.shopName;
+    document.getElementById('shop-type').textContent = state.shop.typeLabel;
+    document.getElementById('shop-slogan').textContent = state.shop.slogan;
+    // Menu
+    document.getElementById('menu').innerHTML = state.shop.menu.map(function (m) {
+      var q = state.cart[m.id] || 0;
+      return '<div class="menu-item"><strong>' + esc(m.name) + '</strong><span>¥' + m.price + '</span>' +
+        '<div><button data-add="' + m.id + '">+ 加入</button> <span>已选 ' + q + '</span>' +
+        (q ? ' <button data-sub="' + m.id + '">−</button>' : '') + '</div></div>';
+    }).join('');
+    // Cart
+    var ct = FL.cartTotal(state.cart, state.shop.menu);
+    var cartHtml = '';
+    Object.keys(state.cart).forEach(function (id) {
+      var m = state.shop.menu.find(function (x) { return x.id === id; });
+      if (m && state.cart[id]) cartHtml += '<p>' + esc(m.name) + ' × ' + state.cart[id] + ' = ¥' + (m.price * state.cart[id]) + '</p>';
+    });
+    document.getElementById('cart').innerHTML = cartHtml || '<p>购物车还是空的，先点几样试试。</p>';
+    document.getElementById('cart').innerHTML += '<p><strong>合计 ¥' + ct.total + '（' + ct.count + ' 件）</strong></p>';
+    // Orders
+    document.getElementById('orders').innerHTML = state.orders.length ? state.orders.map(function (o, i) {
+      return '<div class="order"><p><strong>' + esc(o.id) + '</strong> ' + esc(o.name) + ' · ' + esc(o.time || '') + ' · ¥' + o.total + ' · ' + (o.status === 'done' ? '已完成' : o.status === 'cancelled' ? '已取消' : '待处理') + '</p>' +
+        '<p>' + o.items.map(function (it) { return esc(it.name) + ' ×' + it.qty; }).join('、') + '</p>' +
+        (o.status === 'pending' ? '<button data-done="' + i + '">标记完成</button> <button data-cancel="' + i + '">取消</button>' : '') + '</div>';
+    }).join('') : '<p>还没有订单。</p>';
+    // Ledger
+    var st = FL.ledgerStats(state.orders, state.shop.menu);
+    document.getElementById('ledger-summary').textContent = '已完成订单 ' + st.doneCount + ' 单 / 全部订单 ' + st.orderCount + ' 单 / 总收入 ¥' + st.totalIncome + ' / 最热销：' + st.bestName;
+    var max = st.best.length ? st.best[0].qty : 1;
+    document.getElementById('ledger-bars').innerHTML = st.best.length ? st.best.map(function (b) {
+      return '<div class="bar-row"><span class="bar-label">' + esc(b.name) + ' ×' + b.qty + '</span><div class="bar-track"><div class="bar-fill" style="width:' + Math.round(b.qty / max * 100) + '%"></div></div></div>';
+    }).join('') : '<p>还没有已完成订单，账本是空的。</p>';
+    // Todos
+    document.getElementById('todos').innerHTML = state.shop.todos.map(function (t, i) {
+      var done = !!state.todosDone[i];
+      return '<li><label><input type="checkbox" data-todo="' + i + '"' + (done ? ' checked' : '') + '> ' + (done ? '<s>' + esc(t) + '</s>' : esc(t)) + '</label></li>';
+    }).join('');
+    // Procurement
+    document.getElementById('proc-list').innerHTML = state.shop.procurement.map(function (p) {
+      var checked = !!state.procChecked[p.id];
+      return '<div class="proc-item"><label><input type="checkbox" data-proc="' + p.id + '"' + (checked ? ' checked' : '') + '> <strong>' + esc(p.name) + '</strong>（' + esc(p.spec) + '）×' + p.qty + '</label>' +
+        '<p>新品参考价 ¥' + p.newPrice + ' / 平替参考价 ¥' + p.usedPrice + ' / 模拟节省 ¥' + ((p.newPrice - p.usedPrice) * p.qty) + '（仅为模拟估算）</p>' +
+        '<p class="hint">' + esc(p.priceNote || '参考区间，未核实') + '</p>' +
+        '<p><a href="' + p.taobaoUrl + '" target="_blank" rel="noopener">淘宝搜索</a> · <a href="' + p.jdUrl + '" target="_blank" rel="noopener">京东搜索</a> <span class="hint">（搜索链接，非指定商品）</span></p></div>';
+    }).join('');
+    var checkedIds = Object.keys(state.procChecked).filter(function (k) { return state.procChecked[k]; });
+    var sv = FL.computeSavings(state.shop.procurement, checkedIds.length ? checkedIds : state.shop.procurement.map(function (p) { return p.id; }));
+    document.getElementById('savings').textContent = '已勾选 ' + checkedIds.length + ' 项（未勾选按全部计算）：新品参考价 ¥' + sv.totalNew + ' / 平替参考价 ¥' + sv.totalUsed + ' / 模拟节省 ¥' + sv.totalSaved + '（仅为模拟估算，不是实际可拿到的优惠）';
+    save();
+  }
+  // Delegated clicks
+  document.addEventListener('click', function (e) {
+    var t = e.target;
+    if (t.dataset && t.dataset.add) { state.cart[t.dataset.add] = (state.cart[t.dataset.add] || 0) + 1; renderShop(); }
+    if (t.dataset && t.dataset.sub) { state.cart[t.dataset.sub] = Math.max(0, (state.cart[t.dataset.sub] || 0) - 1); if (!state.cart[t.dataset.sub]) delete state.cart[t.dataset.sub]; renderShop(); }
+    if (t.dataset && t.dataset.done !== undefined) { state.orders[+t.dataset.done].status = 'done'; renderShop(); }
+    if (t.dataset && t.dataset.cancel !== undefined) { state.orders[+t.dataset.cancel].status = 'cancelled'; renderShop(); }
+  });
+  document.addEventListener('change', function (e) {
+    var t = e.target;
+    if (t.dataset && t.dataset.todo !== undefined) { state.todosDone[t.dataset.todo] = t.checked; save(); renderShop(); }
+    if (t.dataset && t.dataset.proc !== undefined) { state.procChecked[t.dataset.proc] = t.checked; renderShop(); }
+  });
+  document.getElementById('btn-generate').addEventListener('click', function () {
+    var idea = document.getElementById('idea').value.trim();
+    if (!idea) { document.getElementById('msg').textContent = '先写一句话。'; return; }
+    document.getElementById('loading').hidden = false; setDisabled(true);
+    setTimeout(function () {
+      try {
+        state.shop = FL.generateShop({ idea: idea });
+        state.cart = {}; state.orders = []; state.todosDone = {}; state.procChecked = {};
+        state.shop.procurement.forEach(function (p) { state.procChecked[p.id] = true; });
+        renderShop();
+        document.getElementById('msg').textContent = '';
+      } catch (err) { document.getElementById('msg').textContent = '生成失败：' + err.message; }
+      document.getElementById('loading').hidden = true; setDisabled(false);
+    }, 150);
+  });
+  document.querySelectorAll('.sample-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.getElementById('idea').value = b.dataset.idea;
+      document.getElementById('btn-generate').click();
+    });
+  });
+  document.getElementById('btn-order').addEventListener('click', function () {
+    if (!state.shop) return;
+    var ct = FL.cartTotal(state.cart, state.shop.menu);
+    if (!ct.count) { document.getElementById('msg').textContent = '购物车还是空的，先点几样。'; return; }
+    var name = document.getElementById('cust-name').value.trim() || '演示顾客';
+    var phone = document.getElementById('cust-phone').value.trim();
+    var time = document.getElementById('cust-time').value.trim();
+    var items = Object.keys(state.cart).map(function (id) {
+      var m = state.shop.menu.find(function (x) { return x.id === id; });
+      return { id: id, name: m.name, qty: state.cart[id], price: m.price };
+    });
+    state.orders.push({ id: 'ORD-' + (state.orders.length + 1), name: name, phone: phone, time: time, total: ct.total, items: items, status: 'pending' });
+    state.cart = {};
+    document.getElementById('cust-name').value = ''; document.getElementById('cust-phone').value = ''; document.getElementById('cust-time').value = '';
+    document.getElementById('msg').textContent = '订单已生成（模拟演示，不是真实下单）。';
+    renderShop();
+  });
+  document.getElementById('btn-export').addEventListener('click', function () {
+    if (!state.shop) { document.getElementById('export-msg').textContent = '先生成店铺。'; return; }
+    var checkedIds = Object.keys(state.procChecked).filter(function (k) { return state.procChecked[k]; });
+    var items = state.shop.procurement.filter(function (p) { return checkedIds.includes(p.id); });
+    var text = FL.buildExportText(state.shop, items);
+    var ta = document.getElementById('export-text');
+    ta.hidden = false; ta.value = text;
+    function done() { document.getElementById('export-msg').textContent = '已复制采购清单（下方文本也可手动复制）。'; }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function () { ta.select(); document.getElementById('export-msg').textContent = '复制被浏览器拦截，下方文本已选中，请手动复制。'; });
+    } else { ta.select(); document.getElementById('export-msg').textContent = '下方文本已选中，请手动复制。'; }
+  });
+  document.getElementById('btn-reset').addEventListener('click', function () {
+    if (!confirm('确定清空整个店铺吗？订单、账本、待办、采购勾选都会清空。')) return;
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+    state = { shop: null, cart: {}, orders: [], todosDone: {}, procChecked: {} };
+    document.getElementById('msg').textContent = '已重置。';
+    renderShop();
+  });
+  load();
+  renderShop();
+  if (!state.shop) document.getElementById('btn-generate').click();
+})();
+</script>
+</body>
+</html>
